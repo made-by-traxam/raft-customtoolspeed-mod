@@ -20,11 +20,9 @@ namespace CustomToolSpeed
         {
             _originalToolSpeeds = new Dictionary<GameMode, float>();
             var gameModeValues =
-                (SO_GameModeValue[]) Traverse.Create(typeof(GameModeValueManager)).Field("gameModeValues").GetValue();
+                (SO_GameModeValue[])Traverse.Create(typeof(GameModeValueManager)).Field("gameModeValues").GetValue();
             foreach (var mode in gameModeValues)
-            {
                 _originalToolSpeeds[mode.gameMode] = mode.toolVariables.removeSpeedMultiplier;
-            }
 
             _harmony = new Harmony(HarmonyId);
             _harmony.PatchAll(Assembly.GetExecutingAssembly());
@@ -59,7 +57,7 @@ namespace CustomToolSpeed
                     if (value <= 0)
                     {
                         LogError("The provided tool speed (<color=green>" + arguments[0] +
-                              "</color>) is not a positive value.");
+                                 "</color>) is not a positive value.");
                         FollowUpLog(
                             "Please provide a positive decimal tool speed value, i.e. <color=green>toolspeed 2.5</color> (1 is the default tool speed).");
                     }
@@ -67,26 +65,24 @@ namespace CustomToolSpeed
                     {
                         SetToolSpeedMultiplier(value, true);
                         LogInfo("Tool speed was set to <color=green>" + value +
-                             "</color>. Type <color=green>toolspeed 1</color> to reset it.");
+                                "</color>. Type <color=green>toolspeed 1</color> to reset it.");
                     }
                 }
                 catch (FormatException)
                 {
                     LogError("<color=green>" + arguments[0] +
-                          "</color> is not a valid value. Please provide a positive decimal tool speed value, i.e. <color=green>toolspeed 2.5</color> (1 is the default tool speed).");
+                             "</color> is not a valid value. Please provide a positive decimal tool speed value, i.e. <color=green>toolspeed 2.5</color> (1 is the default tool speed).");
                 }
             }
         }
 
         private static void SetToolSpeedMultiplier(float multiplier, bool save)
         {
-            SO_GameModeValue[] gameModeValues =
-                (SO_GameModeValue[]) Traverse.Create(typeof(GameModeValueManager)).Field("gameModeValues").GetValue();
+            var gameModeValues =
+                (SO_GameModeValue[])Traverse.Create(typeof(GameModeValueManager)).Field("gameModeValues").GetValue();
             foreach (var mode in gameModeValues)
-            {
                 mode.toolVariables.removeSpeedMultiplier =
                     _originalToolSpeeds[mode.gameMode] * multiplier;
-            }
 
             _currentToolsSpeed = multiplier;
             if (save)
@@ -122,13 +118,19 @@ namespace CustomToolSpeed
         [HarmonyPatch("OnAxeHit")]
         // This method is copied from the original Raft source code and was slightly modified to allow damage value
         // modification. To change as few things as possible, we are not considering ReSharper's code warnings.
+        // Changes:
+        // - replace "return" with "return false" and add "return false" at the end to cancel the execution of the
+        //   original message
+        // - replace references to private fields of the Axe object with the equivalent triple-underscore parameter
+        // - replace all other references of "this" or "base" with "__instance"
+        // - replace the "Harvest(...)" call with a loop that calls it as many times as needed for the custom speed
         // ReSharper disable All
         private class AxeHitPatch
         {
             private static bool Prefix(Axe __instance,
                 ref Network_Player ___playerNetwork,
                 ref HarvestableTree ___currentTreeToChop,
-                ref RaycastHit ___chopHitPoint,
+                ref RaycastHit ___rayHit,
                 ref LayerMask ___hitmask,
                 ref PlayerInventory ___playerInventory,
                 ref AxeMode ___mode)
@@ -149,12 +151,11 @@ namespace CustomToolSpeed
                 }
 
                 ___currentTreeToChop = null;
-                if (Helper.HitAtCursor(out ___chopHitPoint, 5f, ___hitmask))
+                if (Helper.HitAtCursor(out ___rayHit, 5f, ___hitmask))
                 {
-                    if (___chopHitPoint.transform.tag == "Tree")
+                    if (___rayHit.transform.tag == "Tree")
                     {
-                        HarvestableTree componentInParent =
-                            ___chopHitPoint.transform.GetComponentInParent<HarvestableTree>();
+                        HarvestableTree componentInParent = ___rayHit.transform.GetComponentInParent<HarvestableTree>();
                         if (componentInParent != null && !componentInParent.Depleted)
                         {
                             ___currentTreeToChop = componentInParent;
@@ -165,10 +166,10 @@ namespace CustomToolSpeed
                         new Message_AxeHit(Messages.AxeHit, ___playerNetwork, ___playerNetwork.steamID);
                     if (___currentTreeToChop != null)
                     {
-                        message_AxeHit.treeObjectIndex = (int) ___currentTreeToChop.PickupNetwork.ObjectIndex;
+                        message_AxeHit.treeObjectIndex = (int)___currentTreeToChop.PickupNetwork.ObjectIndex;
                         if (Semih_Network.IsHost)
                         {
-                            int howOften = (int) Math.Floor(CustomToolSpeedMod._currentToolsSpeed);
+                            int howOften = (int)Math.Floor(_currentToolsSpeed);
                             for (int i = 0; i < howOften; i++)
                             {
                                 ___currentTreeToChop.Harvest(___playerInventory);
@@ -176,8 +177,8 @@ namespace CustomToolSpeed
                         }
                     }
 
-                    message_AxeHit.HitPoint = ___chopHitPoint.point;
-                    message_AxeHit.HitNormal = ___chopHitPoint.normal;
+                    message_AxeHit.HitPoint = ___rayHit.point;
+                    message_AxeHit.HitNormal = ___rayHit.normal;
                     ___playerNetwork.Inventory.RemoveDurabillityFromHotSlot(1);
                     if (Semih_Network.IsHost)
                     {
